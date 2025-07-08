@@ -1,0 +1,25 @@
+[package]
+name = "hashmemo"
+version = "0.1.0"
+description = "Hash value memoization."
+readme = "README.md"
+documentation = "https://docs.rs/hashmemo"
+repository = "https://github.com/0x676e67/hashmemo"
+license = "MIT"
+authors = ["0x676e67 <gngppz@gmail.com>"]
+keywords = ["hash", "cache", "hash-cache", "memoization"]
+categories = ["caching"]
+edition = "2021"
+
+[dependencies]
+
+
+[dev-dependencies]
+criterion = "0.6.0"
+nohash-hasher = "0.2"
+ahash = { version = "0.8.0", default-features = true }
+
+[[bench]]
+name = "hashmemo"
+harness = false
+
