@@ -11,9 +11,6 @@ keywords = ["hash", "cache", "hash-cache", "memoization"]
 categories = ["caching"]
 edition = "2021"
 
-[dependencies]
-
-
 [dev-dependencies]
 criterion = "0.6.0"
 nohash-hasher = "0.2"

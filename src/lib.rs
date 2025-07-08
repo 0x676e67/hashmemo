@@ -1,10 +1,53 @@
+//! # HashMemo - Hash Value Memoization
+//!
+//! A library for memoizing hash values of complex data structures to improve performance
+//! when the same data is hashed multiple times.
+//!
+//! This library is particularly beneficial for **large data structures** where computing
+//! hash values is expensive (e.g., large strings, vectors, complex nested structures).
+//! By caching the hash value after first computation, subsequent hash operations become
+//! O(1) instead of O(n) where n is the size of the data.
+//!
+//! ## Features
+//!
+//! - Lazy hash computation - only calculates when needed
+//! - Thread-safe caching with atomic operations  
+//! - Minimal memory overhead with zero-sized hashers
+//! - Works with any `BuildHasher` implementation
+//!
+//! ## Examples
+//!
+//! ```rust
+//! use hashmemo::HashMemo;
+//! use std::collections::HashMap;
+//!
+//! // Wrap a large string that will be hashed multiple times
+//! let large_data = "a".repeat(10000); // 10KB string
+//! let memo = HashMemo::new(large_data);
+//!
+//! // Use in HashMap - hash is computed once and cached
+//! let mut map = HashMap::new();
+//! map.insert(memo, "value");
+//!
+//! // Subsequent operations using the same data are much faster
+//! // because the hash is already cached
+//! ```
+//!
+//! ## Performance Benefits
+//!
+//! The performance improvement is most significant for:
+//! - Large strings or byte arrays
+//! - Complex nested data structures (Vec, HashMap, etc.)
+//! - Data that will be used as hash keys multiple times
+//! - Concurrent scenarios where the same data is hashed by multiple threads
+
 use std::borrow::Borrow;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
+use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher, Hash, Hasher};
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::u64;
 
+/// A wrapper that memoizes the hash value of its contained data.
 #[derive(Debug)]
 pub struct HashMemo<T, H: BuildHasher = BuildHasherDefault<DefaultHasher>>
 where
@@ -12,43 +55,47 @@ where
 {
     value: T,
     hash: AtomicU64,
-    build_hasher: H,
+    hasher: H,
 }
 
-impl<T> PartialOrd for HashMemo<T>
+impl<T, H> PartialOrd for HashMemo<T, H>
 where
     T: Eq + Hash + PartialOrd,
+    H: BuildHasher,
 {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.value.partial_cmp(&other.value)
     }
 }
 
-impl<T> Ord for HashMemo<T>
+impl<T, H> Ord for HashMemo<T, H>
 where
     T: Eq + Hash + Ord,
+    H: BuildHasher,
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.value.cmp(&other.value)
     }
 }
 
-impl<T> HashMemo<T>
+impl<T> HashMemo<T, BuildHasherDefault<DefaultHasher>>
 where
     T: Eq + Hash,
 {
+    /// Creates a new `HashMemo` with the default hasher.
+    ///
+    /// The default hasher is `BuildHasherDefault<DefaultHasher>`, which is a zero-sized
+    /// type that creates `DefaultHasher` instances.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use hashmemo::HashMemo;
+    ///
+    /// let memo = HashMemo::new("hello world");
+    /// ```
     pub fn new(value: T) -> Self {
-        Self::new_with_hasher(value)
-    }
-}
-
-impl<T, H> HashMemo<T, BuildHasherDefault<H>>
-where
-    T: Eq + Hash,
-    H: Hasher + Default,
-{
-    pub fn new_with_hasher(value: T) -> Self {
-        Self::new_with_build_hasher(value, BuildHasherDefault::default())
+        Self::with_hasher(value, BuildHasherDefault::default())
     }
 }
 
@@ -57,14 +104,39 @@ where
     T: Eq + Hash,
     H: BuildHasher,
 {
-    pub const fn new_with_build_hasher(value: T, build_hasher: H) -> Self {
+    /// Creates a new `HashMemo` with a custom hasher.
+    ///
+    /// This allows you to specify a custom `BuildHasher` implementation for
+    /// controlling how hash values are computed.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use hashmemo::HashMemo;
+    /// use std::hash::BuildHasherDefault;
+    /// use std::collections::hash_map::DefaultHasher;
+    ///
+    /// let memo = HashMemo::with_hasher("hello", BuildHasherDefault::<DefaultHasher>::default());
+    /// ```
+    pub const fn with_hasher(value: T, hasher: H) -> Self {
         Self {
             value,
             hash: AtomicU64::new(u64::MIN),
-            build_hasher,
+            hasher,
         }
     }
 
+    /// Consumes the `HashMemo` and returns the wrapped value.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use hashmemo::HashMemo;
+    ///
+    /// let memo = HashMemo::new("hello");
+    /// let value = memo.into_inner();
+    /// assert_eq!(value, "hello");
+    /// ```
     #[inline]
     #[must_use]
     pub fn into_inner(self) -> T {
@@ -101,7 +173,7 @@ where
             return;
         }
 
-        let mut hasher = self.build_hasher.build_hasher();
+        let mut hasher = self.hasher.build_hasher();
         self.value.hash(&mut hasher);
         let computed_hash = NonZeroU64::new(hasher.finish())
             .map(NonZeroU64::get)
@@ -143,7 +215,7 @@ where
     H: Hasher + Default,
 {
     fn from(value: T) -> Self {
-        Self::new_with_hasher(value)
+        Self::with_hasher(value, BuildHasherDefault::<H>::default())
     }
 }
 
@@ -156,7 +228,7 @@ where
         Self {
             value: self.value.clone(),
             hash: AtomicU64::new(self.hash.load(Ordering::Relaxed)),
-            build_hasher: self.build_hasher.clone(),
+            hasher: self.hasher.clone(),
         }
     }
 }
@@ -204,18 +276,18 @@ mod tests {
 
     #[test]
     fn hash_is_cached_and_only_calculated_once() {
-        struct YouOnlyHashOnce {
+        struct HashOnce {
             hashed_once: Arc<AtomicBool>,
         }
 
-        impl Eq for YouOnlyHashOnce {}
-        impl PartialEq for YouOnlyHashOnce {
+        impl Eq for HashOnce {}
+        impl PartialEq for HashOnce {
             fn eq(&self, _: &Self) -> bool {
                 true
             }
         }
 
-        impl Hash for YouOnlyHashOnce {
+        impl Hash for HashOnce {
             fn hash<H: Hasher>(&self, _: &mut H) {
                 if self.hashed_once.swap(true, Ordering::SeqCst) {
                     panic!("Hashing should only happen once");
@@ -223,7 +295,7 @@ mod tests {
             }
         }
 
-        let foo = HashMemo::new(YouOnlyHashOnce {
+        let foo = HashMemo::new(HashOnce {
             hashed_once: Arc::new(AtomicBool::new(false)),
         });
 
@@ -272,8 +344,10 @@ mod tests {
         );
 
         // Wrap in HashMemo and ensure it's not stored as zero
-        let memo: HashMemo<_, BuildHasherDefault<NoHashHasher<u64>>> =
-            HashMemo::new_with_hasher(PinHash::<0>());
+        let memo: HashMemo<_, BuildHasherDefault<NoHashHasher<u64>>> = HashMemo::with_hasher(
+            PinHash::<0>(),
+            BuildHasherDefault::<NoHashHasher<u64>>::default(),
+        );
 
         let _ = calculate_hash(&memo);
         let cached = memo.hash.load(Ordering::Relaxed);
