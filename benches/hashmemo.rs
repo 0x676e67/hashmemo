@@ -3,7 +3,7 @@ use hashmemo::HashMemo;
 use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
-    hash::{BuildHasher, Hash},
+    hash::{BuildHasher, Hash, RandomState},
 };
 
 use ahash::RandomState as AHashBuilder;
@@ -70,7 +70,7 @@ fn bench(c: &mut Criterion) {
                     .collect();
 
                 // DefaultHasher
-                bench_hashmap::<_, std::collections::hash_map::RandomState>(
+                bench_hashmap::<_, RandomState>(
                     &mut group,
                     "String",
                     Param {
@@ -82,7 +82,7 @@ fn bench(c: &mut Criterion) {
                     &string_keys,
                 );
 
-                bench_hashmap::<HashMemo<String>, std::collections::hash_map::RandomState>(
+                bench_hashmap::<HashMemo<String>, RandomState>(
                     &mut group,
                     "HashMemo<String>",
                     Param {
@@ -91,7 +91,11 @@ fn bench(c: &mut Criterion) {
                         steps,
                         variant: "DefaultHasher",
                     },
-                    &string_keys.iter().cloned().map(HashMemo::new).collect(),
+                    &string_keys
+                        .iter()
+                        .cloned()
+                        .map(HashMemo::new)
+                        .collect::<Vec<_>>(),
                 );
 
                 // AHash
@@ -116,7 +120,11 @@ fn bench(c: &mut Criterion) {
                         steps,
                         variant: "AHash",
                     },
-                    &string_keys.iter().cloned().map(HashMemo::new).collect(),
+                    &string_keys
+                        .iter()
+                        .cloned()
+                        .map(HashMemo::new)
+                        .collect::<Vec<_>>(),
                 );
 
                 // --- Data: big struct ---
@@ -124,7 +132,7 @@ fn bench(c: &mut Criterion) {
                     .map(|i| BigStruct::new(i.to_string().repeat(word_length)))
                     .collect();
 
-                bench_hashmap::<_, std::collections::hash_map::RandomState>(
+                bench_hashmap::<_, RandomState>(
                     &mut group,
                     "BigStruct",
                     Param {
@@ -136,7 +144,7 @@ fn bench(c: &mut Criterion) {
                     &bigs,
                 );
 
-                bench_hashmap::<HashMemo<BigStruct>, std::collections::hash_map::RandomState>(
+                bench_hashmap::<HashMemo<BigStruct>, RandomState>(
                     &mut group,
                     "HashMemo<BigStruct>",
                     Param {
@@ -160,7 +168,7 @@ fn bench(c: &mut Criterion) {
                     &bigs,
                 );
 
-                bench_hashmap::<HashMemo<BigStruct>, AHashBuilder>(
+                bench_hashmap::<HashMemo<BigStruct, ahash::RandomState>, ahash::RandomState>(
                     &mut group,
                     "HashMemo<BigStruct>",
                     Param {
@@ -169,7 +177,11 @@ fn bench(c: &mut Criterion) {
                         steps,
                         variant: "AHash",
                     },
-                    &bigs.iter().cloned().map(HashMemo::new).collect(),
+                    &bigs
+                        .iter()
+                        .cloned()
+                        .map(|b| HashMemo::with_hasher(b, ahash::RandomState::default()))
+                        .collect::<Vec<_>>(),
                 );
             }
         }
@@ -193,7 +205,11 @@ fn bench_hashmap<T, S>(
             for key in data.iter().cloned() {
                 map.insert(key, ());
             }
-            move_things_around(&mut map, &mut HashMap::with_hasher(S::default()), param.steps);
+            move_things_around(
+                &mut map,
+                &mut HashMap::with_hasher(S::default()),
+                param.steps,
+            );
         });
     });
 }
