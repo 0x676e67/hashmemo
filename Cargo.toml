@@ -1,6 +1,6 @@
 [package]
 name = "hashmemo"
-version = "0.2.0"
+version = "0.2.1"
 description = "Hash value memoization."
 readme = "README.md"
 documentation = "https://docs.rs/hashmemo"
